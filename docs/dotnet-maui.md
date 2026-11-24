@@ -4,18 +4,17 @@ The .NET SDK is for .NET MAUI apps, and for .NET for iOS / .NET for Android apps
 Your app hands it the verified HTTPS links the OS delivers, it asks the Strybok API which in-app
 route a link stands for, and it gives your app each link exactly once.
 
-> **Status — read this first.** The SDK was written on a machine without a .NET SDK.
+> **Status — read this first.** Early release (0.1.x), published on NuGet.
 >
-> | Part                                                  | Compiled | Tests run | On a device |
-> | ----------------------------------------------------- | -------- | --------- | ----------- |
-> | Core library `Strybok` (`netstandard2.0`, `net8.0`)   | **no**   | **no**    | **no**      |
-> | xUnit tests `Strybok.Tests` (written, cover the core) | **no**   | **no**    | —           |
-> | MAUI glue `Strybok.Maui`                              | **no**   | no tests  | **no**      |
-> | The code samples on this page                         | **no**   | —         | **no**      |
+> | Part                                                | Compiled | Tests run | On a device |
+> | --------------------------------------------------- | -------- | --------- | ----------- |
+> | Core library `Strybok` (`netstandard2.0`, `net8.0`) | yes (CI) | yes (CI)  | **no**      |
+> | MAUI glue `Strybok.Maui`                            | yes (CI) | no tests  | **no**      |
+> | The code samples on this page                       | **no**   | —         | **no**      |
 >
-> Expect to fix compile errors on the first build. Run `dotnet test` (section 9) before you rely
-> on anything here, and walk through the [manual test plan](./manual-test-plan.md) on real
-> devices. The package is not published to NuGet.
+> The MAUI glue has only been compiled, never run inside a MAUI app, and the samples on this page
+> were not compiled. Walk through the [manual test plan](./manual-test-plan.md) on real devices
+> before you rely on it.
 >
 > Deferred deep linking is **not supported**: a link tapped before the app is installed is not
 > restored after installation.
@@ -31,22 +30,14 @@ The behaviour every Strybok SDK implements is described in the [SDK contract](./
    [iOS](./ios.md) guides (package name and certificate fingerprints, Team ID and bundle ID).
    Their "verify on a device" and troubleshooting sections apply to .NET apps unchanged.
 
-## 2. Reference the projects
-
-The SDK is not on NuGet yet. Clone its repository next to your app (or add it as a git
-submodule) and reference the projects (adjust the relative path to where your clone lives):
+## 2. Add the packages
 
 ```sh
-git clone https://github.com/strybok/strybok-dotnet
+dotnet add package Strybok
+dotnet add package Strybok.Maui
 ```
 
-```xml
-<!-- MyApp.csproj -->
-<ItemGroup>
-  <ProjectReference Include="..\strybok-dotnet\src\Strybok\Strybok.csproj" />
-  <ProjectReference Include="..\strybok-dotnet\src\Strybok.Maui\Strybok.Maui.csproj" />
-</ItemGroup>
-```
+The source is at [github.com/strybok/strybok-dotnet](https://github.com/strybok/strybok-dotnet).
 
 - `Strybok` is the whole SDK. It has no third-party dependencies on `net8.0` and later; on
   `netstandard2.0` it references `System.Text.Json`.

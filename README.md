@@ -34,22 +34,16 @@ Behaviour shared by all SDKs: [`docs/sdk-contract.md`](./docs/sdk-contract.md).
 | `src/Strybok.Maui`    | `net8.0`                   | `AddStrybok(...)`, platform detection through `DeviceInfo.Platform`     |
 | `tests/Strybok.Tests` | `net8.0`                   | xUnit tests of the contract (core only)                                 |
 
-> **Status: written without a .NET SDK on the authoring machine. Nothing in this package has been
-> compiled or run yet** — not the library, not the MAUI glue, not the tests. Build it and run the
-> tests before relying on it. Not verified on devices and not published to NuGet.
+> **Early release (0.1.x).** The core library builds and passes its tests in CI. The MAUI glue is
+> compiled but has no tests and has never been run inside a MAUI app. Not verified on devices.
 >
 > Deferred deep linking is not supported.
 
 ## Install
 
-Not on NuGet yet. Clone `https://github.com/strybok/strybok-dotnet` next to your app (or add it as
-a git submodule) and reference the projects:
-
-```xml
-<ItemGroup>
-  <ProjectReference Include="..\strybok-dotnet\src\Strybok\Strybok.csproj" />
-  <ProjectReference Include="..\strybok-dotnet\src\Strybok.Maui\Strybok.Maui.csproj" />
-</ItemGroup>
+```sh
+dotnet add package Strybok
+dotnet add package Strybok.Maui
 ```
 
 ## Build and test
