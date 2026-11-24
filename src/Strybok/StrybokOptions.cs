@@ -37,7 +37,7 @@ public sealed class StrybokOptions
     /// </summary>
     public ICollection<string> AllowedHosts { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
-    /// <summary>Time allowed for one resolve attempt. Default: 5 seconds.</summary>
+    /// <summary>Time allowed for one resolve or create-link attempt. Default: 5 seconds.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -67,6 +67,14 @@ public sealed class StrybokOptions
     /// any thread.
     /// </summary>
     public Action<StrybokException>? OnError { get; set; }
+
+    /// <summary>
+    /// Publishable client key of the application (<c>pk_…</c>) from the dashboard ("Links from the
+    /// app"). Only needed for <see cref="StrybokClient.CreateLinkAsync"/>. It is safe to ship
+    /// inside the app: it can only create links for the route patterns listed in the dashboard.
+    /// Never put a secret API key (<c>lb_…</c>) here.
+    /// </summary>
+    public string? ClientKey { get; set; }
 
     /// <summary>
     /// Optional HTTP transport (certificate pinning, proxies, tests). The SDK wraps it in its own

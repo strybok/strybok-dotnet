@@ -35,6 +35,12 @@ internal static class Responses
     public static HttpResponseMessage Json(HttpStatusCode status, string body) =>
         new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    /// <summary>The answer of the create-link endpoint.</summary>
+    public const string CreatedBody =
+        "{\"linkId\":\"link_9\",\"url\":\"https://my-app.strybok.link/Ab3xK9\",\"slug\":\"Ab3xK9\",\"routePath\":\"/product/42\"}";
+
+    public static HttpResponseMessage Created(int status = 201) => Json((HttpStatusCode)status, CreatedBody);
+
     public static HttpResponseMessage Status(int status) =>
         new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent(string.Empty) };
 }
@@ -113,16 +119,71 @@ internal sealed class RecordedEvent
     public JsonElement Body { get; }
 }
 
-/// <summary>Records requests and answers resolve calls with <see cref="OnResolve"/>.</summary>
+/// <summary>One create-link call as the server would see it.</summary>
+internal sealed class RecordedCreate
+{
+    public RecordedCreate(
+        HttpMethod method,
+        Uri uri,
+        IReadOnlyDictionary<string, string> headers,
+        string? contentType,
+        string body)
+    {
+        Method = method;
+        Uri = uri;
+        Headers = headers;
+        ContentType = contentType;
+        Body = body;
+    }
+
+    public HttpMethod Method { get; }
+
+    public Uri Uri { get; }
+
+    /// <summary>Request headers (not content headers), names lower-cased, values joined with a comma.</summary>
+    public IReadOnlyDictionary<string, string> Headers { get; }
+
+    public string? ContentType { get; }
+
+    /// <summary>The body exactly as sent.</summary>
+    public string Body { get; }
+
+    /// <summary>The body parsed; fails the test when it is not JSON.</summary>
+    public JsonElement Json
+    {
+        get
+        {
+            using var document = JsonDocument.Parse(Body);
+            return document.RootElement.Clone();
+        }
+    }
+}
+
+/// <summary>
+/// Records requests and answers resolve calls with <see cref="OnResolve"/> and create-link calls
+/// with <see cref="OnCreate"/>.
+/// </summary>
 internal sealed class FakeApi : HttpMessageHandler
 {
     private readonly object _gate = new object();
+    private readonly List<RecordedCreate> _creates = new List<RecordedCreate>();
     private readonly List<RecordedRequest> _resolves = new List<RecordedRequest>();
     private readonly List<RecordedEvent> _events = new List<RecordedEvent>();
 
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? OnResolve { get; set; }
 
     public Func<CancellationToken, Task<HttpResponseMessage>>? OnEvent { get; set; }
+
+    /// <summary>Answers create-link calls; 201 with <see cref="Responses.CreatedBody"/> when unset.</summary>
+    public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? OnCreate { get; set; }
+
+    public IReadOnlyList<RecordedCreate> Creates
+    {
+        get
+        {
+            lock (_gate) return _creates.ToArray();
+        }
+    }
 
     public IReadOnlyList<RecordedRequest> Resolves
     {
@@ -158,6 +219,26 @@ internal sealed class FakeApi : HttpMessageHandler
 
             var onEvent = OnEvent;
             return onEvent is null ? new HttpResponseMessage(HttpStatusCode.Accepted) : await onEvent(cancellationToken);
+        }
+
+        if (uri.AbsolutePath.EndsWith("/v1/public/links", StringComparison.Ordinal))
+        {
+            var text = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync();
+            var headers = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var header in request.Headers)
+            {
+                headers[header.Key.ToLowerInvariant()] = string.Join(",", header.Value);
+            }
+            var recorded = new RecordedCreate(
+                request.Method,
+                uri,
+                headers,
+                request.Content?.Headers.ContentType?.ToString(),
+                text);
+            lock (_gate) _creates.Add(recorded);
+
+            var onCreate = OnCreate;
+            return onCreate is null ? Responses.Created() : await onCreate(request, cancellationToken);
         }
 
         var accept = string.Join(",", request.Headers.Accept.Select(value => value.ToString()));

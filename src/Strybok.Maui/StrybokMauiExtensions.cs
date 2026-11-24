@@ -22,7 +22,8 @@ public static class StrybokMauiExtensions
     /// }
     /// </code>
     /// <see cref="StrybokOptions.Platform"/> is pre-filled from <c>DeviceInfo.Platform</c>; the
-    /// callback may override it.
+    /// callback may override it. Set <see cref="StrybokOptions.ClientKey"/> there as well to use
+    /// <see cref="StrybokClient.CreateLinkAsync"/> ("Share" links).
     /// </remarks>
     public static IServiceCollection AddStrybok(this IServiceCollection services, Action<StrybokOptions> configure)
     {

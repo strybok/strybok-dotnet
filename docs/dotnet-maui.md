@@ -4,7 +4,7 @@ The .NET SDK is for .NET MAUI apps, and for .NET for iOS / .NET for Android apps
 Your app hands it the verified HTTPS links the OS delivers, it asks the Strybok API which in-app
 route a link stands for, and it gives your app each link exactly once.
 
-> **Status — read this first.** Early release (0.1.x), published on NuGet.
+> **Status — read this first.** Early release (0.2.x), published on NuGet.
 >
 > | Part                                                | Compiled | Tests run | On a device |
 > | --------------------------------------------------- | -------- | --------- | ----------- |
@@ -296,16 +296,78 @@ once and removes it from the queue, so combining both never navigates twice.
 | `GetInitialLinkAsync()`        | The launch link, if not delivered through `LinkReceived` yet.                                                                       |
 | `ResolveAsync(uri, token)`     | Resolve a URI explicitly (QR scanner, tests). Does not raise `LinkReceived` or report an app open.                                  |
 | `IsStrybokUri(uri)`            | Whether a URI (or URL string) is one of this app's links.                                                                           |
+| `CreateLinkAsync(routePath)`   | Create a short link to share, see [below](#create-a-link-to-share).                                                                 |
 | `Dispose()` / `DisposeAsync()` | Stop listening and release resources. Nothing is delivered afterwards.                                                              |
 
 Options (`StrybokOptions`): `ApiBaseUrl`, `AllowedHosts` (both required), `Timeout` (5 s per
 attempt), `MaxRetries` (2; only timeouts, network errors and 5xx are retried), `RetryDelay`
-(400 ms, doubling), `DedupeWindow` (2 s), `ReportAppOpens` (on), `Platform`, `OnError`, plus
+(400 ms, doubling), `DedupeWindow` (2 s), `ReportAppOpens` (on), `Platform`, `OnError`,
+`ClientKey` (only for creating links), plus
 `HttpMessageHandler`, `Clock` and `Delay` for custom transports and tests. An `HttpClient` can be
 passed to the `StrybokClient` constructor instead.
 
 An exception thrown by a `LinkReceived` or `OnError` handler is caught by the SDK (and written to
 `Debug`), so one failing handler cannot stop later links.
+
+### Create a link to share
+
+`CreateLinkAsync` asks the service for a short link to a screen of your app — the "Share" button.
+It is new in 0.2.0; like the other samples on this page, the code below was not compiled.
+
+1. In the dashboard, open the application, switch on **Links from the app** and list the route
+   patterns the app may create links for (for example `/product/*`). Routes outside the list are
+   refused.
+2. Set `ClientKey` to the application's **publishable client key** (`pk_…`). The key is safe to
+   ship inside the app: it can only create links for those patterns. **Never put a secret API key
+   (`lb_…`) in an app**; it is not accepted here.
+
+```csharp
+// MauiProgram.cs
+builder.Services.AddStrybok(options =>
+{
+    options.ApiBaseUrl = new Uri("https://api.strybok.com");
+    options.AllowedHosts.Add("my-app.strybok.link");
+    options.ClientKey = "pk_…";
+});
+
+// The "Share" button
+try
+{
+    CreatedLink link = await strybok.CreateLinkAsync(
+        "/product/42",
+        payload: JsonSerializer.SerializeToElement(new { productId = 42 }),
+        title: "Red shoes");
+    await Share.Default.RequestAsync(new ShareTextRequest { Uri = link.Url.OriginalString });
+}
+catch (StrybokRateLimitedException error)
+{
+    ShowTryAgainLater(error.RetryAfter); // may be null
+}
+catch (StrybokException error)
+{
+    Debug.WriteLine("Could not create a link: " + error.Message);
+}
+```
+
+Only the route is required; `payload` (a `JsonElement` that is a JSON object), `title`,
+`description` and `imageUrl` are optional and left out of the request when not given. Under
+trimming or Native AOT create the payload with a source-generated `JsonSerializerContext` or
+`JsonDocument.Parse`. Asking again for the same content returns the same link.
+
+It only runs when you call it and is independent of receiving links: it works before
+`InitializeAsync`, never raises `LinkReceived` and never calls `OnError`. It throws:
+
+| Type                                                                             | Meaning                                                                                                              | Retry later?            |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `StrybokUnauthorizedException`                                                   | No `ClientKey` set (no network call), or the key was refused: wrong or replaced key, or the feature is switched off. | no                      |
+| `RouteNotAllowedException`                                                       | `RoutePath` is not covered by the route patterns in the dashboard.                                                   | no                      |
+| `StrybokValidationException`                                                     | Bad route or payload (no network call), or rejected by the service; `Issues` lists what it found.                    | no                      |
+| `StrybokRateLimitedException`                                                    | Too many requests, or the app's daily limit of new links is reached.                                                 | yes, after `RetryAfter` |
+| `StrybokNetworkException` / `StrybokTimeoutException` / `StrybokServerException` | No usable answer after the retries (`Timeout`, `MaxRetries`, `RetryDelay` as for resolving).                         | yes                     |
+
+Also `OperationCanceledException` for your token and `ObjectDisposedException` after `Dispose`.
+Errors never contain the client key or the payload. Do not put personal data in a route or
+payload: whoever receives the link can read them.
 
 ## 7. Errors
 
