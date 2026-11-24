@@ -13,8 +13,23 @@
     <RootNamespace>Strybok.Maui</RootNamespace>
     <AssemblyName>Strybok.Maui</AssemblyName>
     <Version>0.1.0</Version>
-    <IsPackable>false</IsPackable>
+    <Description>.NET MAUI glue for the Strybok deep-link SDK: registers the SDK in dependency injection and reports the device platform.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Strybok.Maui</PackageId>
+    <Authors>Strybok</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://strybok.com</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/strybok/strybok-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>deep-linking;universal-links;app-links;maui</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Essentials" Version="8.0.3" />

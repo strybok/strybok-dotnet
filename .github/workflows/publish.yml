@@ -1,0 +1,48 @@
+# Publishes the packages to nuget.org with trusted publishing (OIDC): no API key is stored.
+# nuget.org exchanges the run's identity for a short-lived key only for this repository and
+# this workflow file (nuget.org account → Trusted Publishing).
+#
+# To release: set <Version> in both project files, push the commit, then push the tag `v<version>`.
+name: Publish to NuGet
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  contents: read
+  id-token: write # lets nuget.org verify that the run comes from this repository
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Check that the tag matches the version
+        run: |
+          for project in src/Strybok/Strybok.csproj src/Strybok.Maui/Strybok.Maui.csproj; do
+            version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$project")
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match version $version in $project" >&2
+              exit 1
+            fi
+          done
+      - run: dotnet build Strybok.sln --configuration Release
+      - run: dotnet test Strybok.sln --configuration Release --no-build
+      # Strybok.Maui is not part of the solution (it needs the MAUI Essentials package), so it is
+      # built and packed on its own.
+      - run: dotnet build src/Strybok.Maui/Strybok.Maui.csproj --configuration Release
+      - run: dotnet pack src/Strybok/Strybok.csproj --configuration Release --no-build --output "$RUNNER_TEMP/nupkg"
+      - run: dotnet pack src/Strybok.Maui/Strybok.Maui.csproj --configuration Release --no-build --output "$RUNNER_TEMP/nupkg"
+      - name: Get a short-lived NuGet API key
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: outofmemory
+      - name: Publish
+        run: dotnet nuget push "$RUNNER_TEMP"/nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
