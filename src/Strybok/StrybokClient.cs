@@ -30,10 +30,10 @@ namespace Strybok;
 /// CreatedLink link = await strybok.CreateLinkAsync("/product/42", title: "Red shoes");
 /// </code>
 /// </example>
-public sealed class StrybokClient : IAsyncDisposable, IDisposable
+public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
 {
     /// <summary>Version reported with analytics events.</summary>
-    public const string SdkVersion = "0.2.0";
+    public const string SdkVersion = "0.3.0";
 
     private const string ResolvePath = "/v1/public/resolve";
     private const string EventsPath = "/v1/public/events";
@@ -69,6 +69,20 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly CancellationTokenSource _disposeCts = new CancellationTokenSource();
     private readonly CancellationToken _disposeToken;
+
+    // Deferred links; the flow is in StrybokClient.Deferred.cs.
+    private readonly IDeferredLinkStore? _deferredStore;
+    private readonly InstallReferrerSource?[] _referrerSources;
+
+    /// <summary>The package name on Android, the bundle id on iOS; <c>null</c> when not given.</summary>
+    private readonly string? _deferredIdentifier;
+
+    /// <summary>A store, an identifier and a platform with a flow: what the option needs to do anything.</summary>
+    private readonly bool _deferredPossible;
+    private readonly bool _allowMatching;
+    private readonly Func<string?>? _deviceFamily;
+    private readonly Func<string?>? _locale;
+    private readonly Func<CancellationToken, Task<bool>>? _pasteboardMayContainLink;
 
     // Everything below is guarded by _gate.
     private EventHandler<ResolvedDeepLink>? _handlers;
@@ -155,6 +169,22 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
                 _platform = "unknown";
                 break;
         }
+
+        _deferredStore = options.DeferredLinkStore;
+        var sources = options.InstallReferrerSources;
+        _referrerSources = sources is null ? new InstallReferrerSource?[0] : new List<InstallReferrerSource?>(sources).ToArray();
+        _deferredIdentifier = _platform == "android"
+            ? NormalizeIdentifier(options.AndroidPackageName)
+            : _platform == "ios" ? NormalizeIdentifier(options.IosBundleId) : null;
+        _deferredPossible = _deferredStore is not null && _deferredIdentifier is not null;
+        _allowMatching = options.AllowProbabilisticMatching;
+        _deviceFamily = options.DeviceFamily;
+        _locale = options.Locale;
+        _pasteboardMayContainLink = options.PasteboardMayContainLink;
+        _deferredRequested = options.DeferredLinks;
+        _deferredStatus = _deferredRequested && _deferredPossible
+            ? DeferredLinkStatus.Pending
+            : DeferredLinkStatus.Disabled;
 
         if (httpClient is not null)
         {
@@ -391,6 +421,7 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
             _pending.Clear();
             _initialLink = null;
             _handlers = null;
+            _statusHandlers = null;
             subscription = _subscription;
             _subscription = null;
         }
@@ -461,6 +492,8 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
 
             if (initial is not null) await HandleAsync(initial, isInitial: true).ConfigureAwait(false);
             completion.TrySetResult(true);
+            // After everything else, and never awaited: the deferred-link check.
+            OnStartCompleted();
         }
         catch (Exception error)
         {
@@ -486,7 +519,10 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
 
             lock (_gate)
             {
-                if (_disposed || IsDuplicate(original)) return;
+                if (_disposed) return;
+                // From here on a deferred link would be a second navigation: a normal link wins.
+                _normalLinkAccepted = true;
+                if (IsDuplicate(original)) return;
             }
 
             ResolvedDeepLink link;
@@ -589,7 +625,8 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
 
     private async Task<ResolvedDeepLink> ResolveCoreAsync(Uri uri, string lookup, CancellationToken cancellationToken)
     {
-        // Query and fragment of the link are not part of the lookup: they may hold private data.
+        // Of the link's query only the campaign parameters are part of the lookup; the rest and
+        // the fragment may hold private data.
         var endpoint = new Uri(_apiBase + ResolvePath + "?url=" + Uri.EscapeDataString(lookup));
 
         StrybokException? lastError = null;
@@ -745,7 +782,10 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
                 var payload = root.TryGetProperty("payload", out var value) && value.ValueKind == JsonValueKind.Object
                     ? value.Clone()
                     : EmptyPayload;
-                return new ResolvedDeepLink(uri, linkId, appId, routePath, payload);
+                var campaign = root.TryGetProperty("campaign", out var campaignValue)
+                    ? ParseCampaign(campaignValue)
+                    : LinkCampaign.Empty;
+                return new ResolvedDeepLink(uri, linkId, appId, routePath, payload, campaign);
             }
         }
         catch (JsonException)
@@ -754,6 +794,37 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
         }
 
         throw new StrybokServerException("Malformed resolve response", 200, uri);
+    }
+
+    /// <summary>Keeps the five string fields; anything else, or no object at all, is not an error.</summary>
+    private static LinkCampaign ParseCampaign(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return LinkCampaign.Empty;
+        var campaign = new LinkCampaign(
+            GetOptionalString(element, "source"),
+            GetOptionalString(element, "medium"),
+            GetOptionalString(element, "campaign"),
+            GetOptionalString(element, "term"),
+            GetOptionalString(element, "content"));
+        return campaign.IsEmpty ? LinkCampaign.Empty : campaign;
+    }
+
+    private static string? GetOptionalString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    /// <summary>What resolve returned, unchanged; nothing when there are no values.</summary>
+    private static void WriteCampaign(Utf8JsonWriter writer, LinkCampaign campaign)
+    {
+        if (campaign.IsEmpty) return;
+        writer.WriteStartObject("campaign");
+        if (campaign.Source is not null) writer.WriteString("source", campaign.Source);
+        if (campaign.Medium is not null) writer.WriteString("medium", campaign.Medium);
+        if (campaign.Campaign is not null) writer.WriteString("campaign", campaign.Campaign);
+        if (campaign.Term is not null) writer.WriteString("term", campaign.Term);
+        if (campaign.Content is not null) writer.WriteString("content", campaign.Content);
+        writer.WriteEndObject();
     }
 
     private static bool TryGetString(JsonElement element, string name, out string value)
@@ -792,6 +863,7 @@ public sealed class StrybokClient : IAsyncDisposable, IDisposable
                     writer.WriteString("type", "app_open");
                     writer.WriteString("platform", _platform);
                     writer.WriteString("sdkVersion", SdkVersion);
+                    WriteCampaign(writer, link.Campaign);
                     writer.WriteEndObject();
                 }
                 body = buffer.ToArray();

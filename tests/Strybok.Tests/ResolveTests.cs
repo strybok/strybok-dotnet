@@ -327,7 +327,7 @@ public sealed class ResolveTests
     [Fact]
     public void Sdk_version_fits_the_event_schema()
     {
-        Assert.Equal("0.2.0", StrybokClient.SdkVersion);
+        Assert.Equal("0.3.0", StrybokClient.SdkVersion);
         Assert.True(StrybokClient.SdkVersion.Length <= 32);
     }
 }

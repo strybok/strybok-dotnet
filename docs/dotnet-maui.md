@@ -4,7 +4,7 @@ The .NET SDK is for .NET MAUI apps, and for .NET for iOS / .NET for Android apps
 Your app hands it the verified HTTPS links the OS delivers, it asks the Strybok API which in-app
 route a link stands for, and it gives your app each link exactly once.
 
-> **Status — read this first.** Early release (0.2.x), published on NuGet.
+> **Status — read this first.** Early release (0.3.x), published on NuGet.
 >
 > | Part                                                | Compiled | Tests run | On a device |
 > | --------------------------------------------------- | -------- | --------- | ----------- |
@@ -16,8 +16,10 @@ route a link stands for, and it gives your app each link exactly once.
 > were not compiled. Walk through the [manual test plan](./manual-test-plan.md) on real devices
 > before you rely on it.
 >
-> Deferred deep linking is **not supported**: a link tapped before the app is installed is not
-> restored after installation.
+> A link tapped before the app is installed is **not restored by default**. Deferred links are an
+> option that is off by default and has never run on a device; the packages ship no store
+> integration, so your app supplies the install referrer (Android) or the pasted link (iOS). See
+> [Deferred links](#deferred-links-optional).
 
 The behaviour every Strybok SDK implements is described in the [SDK contract](./sdk-contract.md).
 
@@ -289,22 +291,28 @@ once and removes it from the queue, so combining both never navigates twice.
 
 ### API
 
-| Member                         | Purpose                                                                                                                             |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `InitializeAsync()`            | Start listening; completes after the launch link was handled. Idempotent.                                                           |
-| `LinkReceived`                 | Event with a `ResolvedDeepLink` (`Uri`, `LinkId`, `AppId`, `RoutePath`, `Payload`). Queued links are replayed to the first handler. |
-| `GetInitialLinkAsync()`        | The launch link, if not delivered through `LinkReceived` yet.                                                                       |
-| `ResolveAsync(uri, token)`     | Resolve a URI explicitly (QR scanner, tests). Does not raise `LinkReceived` or report an app open.                                  |
-| `IsStrybokUri(uri)`            | Whether a URI (or URL string) is one of this app's links.                                                                           |
-| `CreateLinkAsync(routePath)`   | Create a short link to share, see [below](#create-a-link-to-share).                                                                 |
-| `Dispose()` / `DisposeAsync()` | Stop listening and release resources. Nothing is delivered afterwards.                                                              |
+| Member                         | Purpose                                                                                                                                         |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InitializeAsync()`            | Start listening; completes after the launch link was handled. Idempotent.                                                                       |
+| `LinkReceived`                 | Event with a `ResolvedDeepLink` (`Uri`, `LinkId`, `AppId`, `RoutePath`, `Payload`, `Campaign`). Queued links are replayed to the first handler. |
+| `GetInitialLinkAsync()`        | The launch link, if not delivered through `LinkReceived` yet.                                                                                   |
+| `ResolveAsync(uri, token)`     | Resolve a URI explicitly (QR scanner, tests). Does not raise `LinkReceived` or report an app open.                                              |
+| `IsStrybokUri(uri)`            | Whether a URI (or URL string) is one of this app's links.                                                                                       |
+| `CreateLinkAsync(routePath)`   | Create a short link to share, see [below](#create-a-link-to-share).                                                                             |
+| `DeferredLinkStatus`           | Where the deferred-link check stands (event `DeferredLinkStatusChanged`), see [Deferred links](#deferred-links-optional).                       |
+| `EnableDeferredLinks()`        | Switch deferred links on after the client was created, for example after a consent screen.                                                      |
+| `RedeemPastedLinkAsync(text)`  | iOS: redeem a link the person pasted; `SkipPastedLink()` when they moved on.                                                                    |
+| `Dispose()` / `DisposeAsync()` | Stop listening and release resources. Nothing is delivered afterwards.                                                                          |
 
 Options (`StrybokOptions`): `ApiBaseUrl`, `AllowedHosts` (both required), `Timeout` (5 s per
 attempt), `MaxRetries` (2; only timeouts, network errors and 5xx are retried), `RetryDelay`
 (400 ms, doubling), `DedupeWindow` (2 s), `ReportAppOpens` (on), `Platform`, `OnError`,
 `ClientKey` (only for creating links), plus
 `HttpMessageHandler`, `Clock` and `Delay` for custom transports and tests. An `HttpClient` can be
-passed to the `StrybokClient` constructor instead.
+passed to the `StrybokClient` constructor instead. For
+[deferred links](#deferred-links-optional): `DeferredLinks` and `AllowProbabilisticMatching` (both
+off), `InstallReferrerSources`, `AndroidPackageName`, `IosBundleId`, `DeviceFamily`, `Locale`,
+`PasteboardMayContainLink` and `DeferredLinkStore`.
 
 An exception thrown by a `LinkReceived` or `OnError` handler is caught by the SDK (and written to
 `Debug`), so one failing handler cannot stop later links.
@@ -368,6 +376,174 @@ It only runs when you call it and is independent of receiving links: it works be
 Also `OperationCanceledException` for your token and `ObjectDisposedException` after `Dispose`.
 Errors never contain the client key or the payload. Do not put personal data in a route or
 payload: whoever receives the link can read them.
+
+### Deferred links (optional)
+
+A deferred link is one a person tapped **before** the app was installed. The feature is off by
+default, works very differently on the two platforms, and **nothing of it has run on a device**
+(in `Strybok.Maui` it has not even been run in an app, only compiled). What the server does, what
+the person sees and what it costs is in the
+[Android](./android.md#links-tapped-before-the-app-is-installed-deferred-links) and
+[iOS](./ios.md#links-tapped-before-the-app-is-installed) guides; the exact behaviour is in the
+[SDK contract](./sdk-contract.md#deferred-links-optional-android).
+
+These packages ship **no store integration and no native code**: they never ask a store for the
+install referrer and never read the pasteboard. Your app supplies both; the SDK does the rest
+(the state, the request, the once-only delivery).
+
+| What                                        | Who supplies it                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Switch                                      | You: `DeferredLinks = true`, or `strybok.EnableDeferredLinks()` later (after a consent screen).               |
+| The owner's setting                         | The application's owner, in the dashboard or the API (see the two native guides).                             |
+| State (attempt counter, "done" flag)        | `AddStrybok`: MAUI `Preferences` (`PreferencesDeferredLinkStore`). Core only: **you**, `DeferredLinkStore`.   |
+| Package name / bundle id                    | `AddStrybok`: `AppInfo.PackageName`. Core only: **you**, `AndroidPackageName` / `IosBundleId`.                |
+| Android: the store's install referrer       | **You**: one or more `InstallReferrerSources` (below).                                                        |
+| iOS: the pasted text                        | **You**: a paste action of your app, handed to `strybok.RedeemPastedLinkAsync(text)`.                         |
+| iOS matching: device family and language    | `AddStrybok`: `DeviceInfo` and `CultureInfo.CurrentUICulture`. Core only: **you**, `DeviceFamily` / `Locale`. |
+| iOS matching: "is there anything to paste?" | Optional, you: `PasteboardMayContainLink` (skipped when not set).                                             |
+
+Everything `AddStrybok` pre-fills can be replaced in its callback. With the core package alone
+there are no defaults: without a `DeferredLinkStore` (an `IDeferredLinkStore`: two methods,
+`Read(key)` and `Write(key, value)`, over any storage that survives a restart) and the identifier
+of the platform the feature stays `Disabled`. Never pass a store that only lives in memory; the
+link would be redeemed again on the next launch.
+
+The link arrives through `LinkReceived` like any other, with `link.IsDeferred == true`, possibly a
+second or two after your first page is shown. `GetInitialLinkAsync` never returns it, no
+`app_open` is reported for it, and if a normal link opened the app in the same launch the deferred
+one is dropped. Nothing about the check reaches `OnError` or throws: most people who install an
+app never tapped a link. For QA there is `strybok.DeferredLinkStatus` (event
+`DeferredLinkStatusChanged`, raised on any thread):
+
+| Status           | Meaning                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `Disabled`       | Off, or it cannot run: no store, no identifier, or the platform is neither Android nor iOS.            |
+| `Pending`        | Not started yet, or this launch could not finish (store or network unreachable); a later launch tries. |
+| `Checking`       | Running now.                                                                                           |
+| `NotFirstLaunch` | Finished in an earlier launch.                                                                         |
+| `Unavailable`    | Android: no source, or none can ever answer. iOS: nothing automatic exists (see below).                |
+| `NoReferrer`     | The store's referrer has no link of ours: an ordinary install.                                         |
+| `NotFound`       | The server refused: unknown, older than 24 hours, already used, or another application's.              |
+| `Superseded`     | A normal link arrived first.                                                                           |
+| `Delivered`      | Handed to `LinkReceived`.                                                                              |
+| `Failed`         | Three launches could not finish, or the answer was unusable.                                           |
+| `AwaitingPaste`  | iOS matching is waiting for `RedeemPastedLinkAsync` or `SkipPastedLink`.                               |
+
+The check runs at most three times in the life of an installation and delivers at most once; the
+SDK stores only the counter and the flag, never the referrer, the pasted text or the id.
+
+#### Android: supply the install referrer
+
+A source is a delegate of your app (`InstallReferrerSource`) that answers with the raw referrer
+string of one store, or "unavailable for now" (try again on a later launch), or "unavailable"
+(never on this device). It is called on a thread-pool thread, must not throw and has 10 seconds.
+Sources are asked in order; the first referrer that holds a Strybok id wins.
+
+```csharp
+builder.Services.AddStrybok(options =>
+{
+    options.ApiBaseUrl = new Uri("https://api.strybok.com");
+    options.AllowedHosts.Add("my-app.strybok.link");
+    options.DeferredLinks = true;              // or strybok.EnableDeferredLinks() after consent
+#if ANDROID
+    options.InstallReferrerSources.Add(PlayInstallReferrer.AskAsync);
+#endif
+});
+```
+
+`PlayInstallReferrer.AskAsync` is **yours to write** — there is no install referrer API in MAUI or
+in .NET for Android. Google's library (`com.android.installreferrer:installreferrer:2.2`) is a
+Java library: you need a .NET binding of it (a binding package you trust, or your own Android
+binding project around the AAR). Its shape, with the mapping every Strybok SDK uses:
+
+```csharp
+#if ANDROID
+// App code, not part of the SDK, never compiled or run by us. `client` stands for your binding of
+// com.android.installreferrer.api.InstallReferrerClient.
+public static class PlayInstallReferrer
+{
+    public static async Task<InstallReferrerAnswer> AskAsync(CancellationToken cancellationToken)
+    {
+        // 1. client = InstallReferrerClient.newBuilder(context).build(); client.startConnection(listener)
+        // 2. In onInstallReferrerSetupFinished(responseCode):
+        //      OK (0)                                         -> InstallReferrerAnswer.Referrer(
+        //                                                          client.getInstallReferrer().getInstallReferrer())
+        //      SERVICE_UNAVAILABLE (1), SERVICE_DISCONNECTED (-1),
+        //      a RemoteException, onInstallReferrerServiceDisconnected -> InstallReferrerAnswer.UnavailableForNow
+        //      FEATURE_NOT_SUPPORTED (2), DEVELOPER_ERROR (3) -> InstallReferrerAnswer.Unavailable
+        // 3. Always client.endConnection(), also when cancellationToken is cancelled.
+        // Read only the referrer string, not the timestamps, and never log it.
+        throw new NotImplementedException();
+    }
+}
+#endif
+```
+
+Huawei AppGallery and Samsung Galaxy Store hand the referrer over in their own ways (a content
+provider and Samsung's library). **Those two flows are unverified even in the native Strybok
+SDKs** — nobody has tried how the stores treat the value — so if you write sources for them,
+treat them as experiments.
+
+Reading the install referrer is access to information stored on the device. Whether you need the
+person's consent first is your decision; the SDK supports it by doing nothing until
+`DeferredLinks` is on — leave it off and call `strybok.EnableDeferredLinks()` after your consent
+screen.
+
+#### iOS: the pasted link
+
+The App Store passes nothing to a newly installed app. With the owner's "copy link" option the
+person copies the link on a page before the App Store; your app offers a **Paste** action and
+hands the text to the SDK:
+
+```csharp
+// From the tap on your own "Paste link" button — never automatically.
+string? text = await Clipboard.Default.GetTextAsync();
+PastedLinkResult result = await strybok.RedeemPastedLinkAsync(text);
+```
+
+`Delivered` means the link is on its way through `LinkReceived`. `NotOurs` means the text was not
+a copied link of this app: nothing was sent and the text is dropped. `NotFound`: the server
+refused it (older than 24 hours, already used). `AlreadyHandled`: a deferred link was handled
+before on this installation. `Failed`: no answer (the person can tap again) or an unusable one.
+`Disabled`: off, or not iOS.
+
+Be honest with yourself about this step. MAUI has **no control for Apple's paste button**
+(`UIPasteControl`, iOS 16 or later): `Clipboard.Default.GetTextAsync()` is a programmatic read of
+the pasteboard, so iOS shows its "Allow Paste" prompt each time. To avoid the prompt, show
+Apple's `UIPasteControl` from iOS platform code (a custom handler) and pass the string it delivers
+to `RedeemPastedLinkAsync`. Either way: place the action on the first page or in onboarding with
+a sentence that says what it does, describe it in the App Review notes, and never read the
+clipboard at launch. The costs of this option: one extra page and tap for every iOS visitor
+without the app, it overwrites the person's clipboard, and it works only if they copy there
+**and** paste here.
+
+#### iOS: probabilistic matching (not recommended)
+
+With `AllowProbabilisticMatching = true` (and the owner's setting, and an opt-in on each link) the
+SDK asks the server on the first launch whether a link was tapped from the same network address,
+device family and language. It sends the bundle id, `iphone`/`ipad`/`ipod`, a language tag and the
+SDK version — nothing else; the server uses the connection's IP address.
+
+- **Apple forbids it.** This is fingerprinting in the sense of the App Store Review Guidelines and
+  the Apple Developer Program License Agreement, with or without consent. The App Review and
+  legal risk is the app owner's.
+- **A match is a guess.** On a shared network (Wi-Fi, office, carrier NAT) it can be **another
+  person's link**. Check `link.IsProbabilisticMatch`: such a link must never by itself sign anyone
+  in, accept an invitation, apply a personal discount or show personal content.
+- **It often cannot work**: iCloud Private Relay and VPNs give the browser and the app different
+  addresses, and so does changing network between the tap and the first launch.
+- **Privacy consequences**: the service processes IP addresses for your application; your privacy
+  policy and App Store privacy labels must cover it, and consent may be needed.
+- **Per-link opt-in**: only links explicitly allowed for matching can be matched.
+- **Accuracy is unknown.** Nobody can measure how often a match was wrong.
+
+If you also offer the paste action, set `PasteboardMayContainLink` (from iOS platform code,
+`UIPasteboard`'s detect-patterns call for a probable web URL, which reads no content): when it
+answers `true` the status becomes `AwaitingPaste` and matching starts only after
+`RedeemPastedLinkAsync` returned `NotOurs` or you called `strybok.SkipPastedLink()`. Without that
+callback matching does not wait. The default `Locale` is the UI culture, which can differ from
+the device's first preferred language; set it to `NSLocale.PreferredLanguages[0]` from iOS
+platform code for the exact value.
 
 ## 7. Errors
 
@@ -459,8 +635,52 @@ After a link is delivered (or queued) the SDK sends one best-effort `app_open` e
 (`ios`/`android`/`unknown`) and the SDK version — no device identifiers. It never delays
 navigation and all failures are ignored. Disable it with `ReportAppOpens = false`.
 
-Only the link's host and slug are sent to `resolve`; query parameters and fragments stay on the
-device.
+Only the link's host and slug are sent to `resolve`, plus the five `utm_*` campaign parameters of
+the tapped URL when they are valid (see below); every other query parameter and the fragment
+stay on the device.
+
+With [deferred links](#deferred-links-optional) switched on the SDK additionally sends, at most a
+few times per installation: on Android the single-use id found in the install referrer your code
+handed over, the package name and the SDK version; on iOS the id found in a pasted link, the
+bundle id and the SDK version — or, only with `AllowProbabilisticMatching`, the bundle id, the
+device family, a language tag and the SDK version, to a server that then uses the connection's IP
+address. That last case is the one exception to "no fingerprint".
+
+### Campaign values
+
+A resolved link has `Campaign` (`LinkCampaign`): the `utm_source`, `utm_medium`, `utm_campaign`,
+`utm_term` and `utm_content` of this open as `Source`, `Medium`, `Campaign`, `Term` and
+`Content`. It is never `null`; a property without a value is `null`, and `Campaign.IsEmpty` is
+`true` when there is none at all. Like the other samples on this page, the code below was not
+compiled.
+
+```csharp
+strybok.LinkReceived += (_, link) =>
+{
+    if (link.Campaign.Source is { } source) analytics.SetLabel("link_source", source); // a label, nothing more
+    Navigate(link.RoutePath);
+};
+```
+
+- **Where the values come from.** The link's defaults — set in the dashboard (link form →
+  "Campaign (optional)") or through the management API — with the `utm_*` parameters of the
+  tapped URL on top, key by key. `https://my-app.strybok.link/invite777?utm_source=instagram`
+  opens with source `instagram` whatever the default is; a link tapped without parameters gives
+  the defaults. A URL can replace a default but cannot clear it.
+- **Untrusted labels.** Whoever shares a link can write any `utm_*` value into its URL. Use the
+  values as labels for your own analytics; never decide access, prices, rewards or navigation by
+  them.
+- **What is accepted.** Only these five lower-case names, and only values of 1–64 characters
+  out of `A–Z a–z 0–9 . _ ~ -`. Anything else (`spring sale`, an e-mail address, non-Latin
+  letters) is dropped silently, as if the parameter were absent — by the SDK and again by the
+  server.
+- **What is sent.** With the resolve request the SDK sends those five parameters when they are
+  valid, and nothing else of the query and never the fragment. With the `app_open` event it
+  reports the values exactly as resolve returned them. The dashboard's link analytics then
+  shows a "Campaigns" breakdown by source, medium and campaign, with app opens and browser opens
+  counted separately (term and content are not broken down).
+- **Versions.** New in 0.3.0. Older versions send no query: their links carry no `campaign` and
+  their app opens are counted under the link's defaults.
 
 ## Troubleshooting
 

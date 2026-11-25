@@ -169,6 +169,7 @@ internal sealed class FakeApi : HttpMessageHandler
     private readonly List<RecordedCreate> _creates = new List<RecordedCreate>();
     private readonly List<RecordedRequest> _resolves = new List<RecordedRequest>();
     private readonly List<RecordedEvent> _events = new List<RecordedEvent>();
+    private readonly List<RecordedCreate> _deferred = new List<RecordedCreate>();
 
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? OnResolve { get; set; }
 
@@ -176,6 +177,18 @@ internal sealed class FakeApi : HttpMessageHandler
 
     /// <summary>Answers create-link calls; 201 with <see cref="Responses.CreatedBody"/> when unset.</summary>
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? OnCreate { get; set; }
+
+    /// <summary>Answers deferred-link calls (redeem and match); 404 when unset.</summary>
+    public Func<RecordedCreate, CancellationToken, Task<HttpResponseMessage>>? OnDeferred { get; set; }
+
+    /// <summary>The redeem and match calls, in order.</summary>
+    public IReadOnlyList<RecordedCreate> Deferred
+    {
+        get
+        {
+            lock (_gate) return _deferred.ToArray();
+        }
+    }
 
     public IReadOnlyList<RecordedCreate> Creates
     {
@@ -219,6 +232,26 @@ internal sealed class FakeApi : HttpMessageHandler
 
             var onEvent = OnEvent;
             return onEvent is null ? new HttpResponseMessage(HttpStatusCode.Accepted) : await onEvent(cancellationToken);
+        }
+
+        if (uri.AbsolutePath.Contains("/v1/public/deferred-links/"))
+        {
+            var text = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync();
+            var headers = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var header in request.Headers)
+            {
+                headers[header.Key.ToLowerInvariant()] = string.Join(",", header.Value);
+            }
+            var recorded = new RecordedCreate(
+                request.Method,
+                uri,
+                headers,
+                request.Content?.Headers.ContentType?.ToString(),
+                text);
+            lock (_gate) _deferred.Add(recorded);
+
+            var onDeferred = OnDeferred;
+            return onDeferred is null ? Responses.Status(404) : await onDeferred(recorded, cancellationToken);
         }
 
         if (uri.AbsolutePath.EndsWith("/v1/public/links", StringComparison.Ordinal))
@@ -327,7 +360,8 @@ internal sealed class FakeLinkSource : ILinkSource
 /// <summary>
 /// Replaces real waiting. Retry pauses are recorded and end immediately. The per-attempt timeout
 /// (recognised by its length) never fires unless <see cref="FireTimeouts"/> is set, in which case
-/// it fires immediately. Either way no test waits for wall-clock time.
+/// it fires immediately; the same goes for the 10-second limit of an install referrer source and
+/// <see cref="FireSourceTimeouts"/>. Either way no test waits for wall-clock time.
 /// </summary>
 internal sealed class FakeDelay
 {
@@ -336,7 +370,12 @@ internal sealed class FakeDelay
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>What the SDK allows one install referrer source.</summary>
+    public static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(10);
+
     public bool FireTimeouts { get; set; }
+
+    public bool FireSourceTimeouts { get; set; }
 
     public IReadOnlyList<TimeSpan> RetryPauses
     {
@@ -351,6 +390,10 @@ internal sealed class FakeDelay
         if (delay == Timeout)
         {
             return FireTimeouts ? Task.CompletedTask : Async.Never<bool>(cancellationToken);
+        }
+        if (delay == SourceTimeout)
+        {
+            return FireSourceTimeouts ? Task.CompletedTask : Async.Never<bool>(cancellationToken);
         }
 
         lock (_gate) _retryPauses.Add(delay);

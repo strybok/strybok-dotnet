@@ -7,7 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>Strybok</RootNamespace>
     <AssemblyName>Strybok</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Description>Strybok deep-link SDK for .NET: resolves Universal Links / App Links to an in-app route and delivers each link exactly once.</Description>
     <IsPackable>true</IsPackable>
     <PackageId>Strybok</PackageId>

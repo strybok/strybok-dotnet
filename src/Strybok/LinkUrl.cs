@@ -23,8 +23,10 @@ internal static class LinkUrl
 
     /// <summary>
     /// Returns <c>true</c> when <paramref name="url"/> is <c>https://{allowed host}[:443]/{slug}</c>
-    /// with an optional query and fragment. <paramref name="lookup"/> is then
-    /// <c>https://{lower-cased host}/{slug}</c>: no port, no query, no fragment.
+    /// with an optional query and fragment, which do not decide anything here.
+    /// <paramref name="lookup"/> is then <c>https://{lower-cased host}/{slug}</c> followed by the
+    /// campaign query (<see cref="CampaignQuery"/>): no port, nothing else of the query, no
+    /// fragment — they may hold private data.
     /// </summary>
     public static bool TryParse(string? url, HashSet<string> allowedHosts, out string lookup)
     {
@@ -66,7 +68,15 @@ internal static class LinkUrl
             if (!IsSlugChar(url[i])) return false;
         }
 
-        lookup = SchemePrefix + host + url.Substring(pathStart, pathEnd - pathStart);
+        var rawQuery = string.Empty;
+        if (pathEnd < url.Length && url[pathEnd] == '?')
+        {
+            var queryEnd = url.IndexOf('#', pathEnd);
+            if (queryEnd < 0) queryEnd = url.Length;
+            rawQuery = url.Substring(pathEnd + 1, queryEnd - pathEnd - 1);
+        }
+
+        lookup = SchemePrefix + host + url.Substring(pathStart, pathEnd - pathStart) + CampaignQuery.Build(rawQuery);
         return true;
     }
 

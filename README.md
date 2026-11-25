@@ -35,6 +35,39 @@ CreatedLink link = await strybok.CreateLinkAsync("/product/42", title: "Red shoe
 await Share.Default.RequestAsync(new ShareTextRequest { Uri = link.Url.OriginalString });
 ```
 
+Campaign values (`utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`) of the
+open come with the link, as `link.Campaign.Source` and so on (`null` when not set).
+Campaign values are the link's defaults (set in the dashboard) overridden by the `utm_*`
+parameters of the tapped URL. They are labels chosen by whoever shared the link: use them for
+your analytics, never to decide anything. Details:
+[integration guide](./docs/dotnet-maui.md#campaign-values).
+
+## Deferred links (optional)
+
+Restoring a link that was tapped before the app was installed is optional, **off by default and
+has never run on a device**. The packages ship no store integration and never read the
+pasteboard; your app supplies what the platform has:
+
+- **Android:** `DeferredLinks = true` plus at least one `InstallReferrerSources` entry: a delegate
+  of yours that returns the store's raw install referrer, `UnavailableForNow` or `Unavailable`.
+  There is no install referrer API in MAUI: you need a .NET binding of Google's library. Huawei
+  AppGallery and Samsung Galaxy Store flows are unverified even in the native SDKs.
+- **iOS:** `await strybok.RedeemPastedLinkAsync(text)` with the text the person pasted. MAUI has
+  no control for Apple's paste button, so `Clipboard.Default.GetTextAsync()` shows the iOS paste
+  prompt; it costs the person extra taps and works only if they paste.
+- **iOS probabilistic matching** (`AllowProbabilisticMatching`) is **forbidden by Apple's rules**
+  (the App Review and legal risk is yours), can hand over another person's link on a shared
+  network, fails behind Private Relay or a VPN, and has privacy-policy consequences. Check
+  `link.IsProbabilisticMatch` before doing anything personal with such a link.
+
+`AddStrybok` keeps the two state values in MAUI `Preferences` and takes the package name / bundle
+id from `AppInfo.PackageName`. The core package has no default: pass an `IDeferredLinkStore`
+(`DeferredLinkStore`) over storage that survives a restart, and `AndroidPackageName` /
+`IosBundleId`; otherwise the status stays `Disabled`. Deferred links arrive through `LinkReceived`
+with `link.IsDeferred`; `strybok.DeferredLinkStatus` says where the check stands. Details:
+[integration guide](./docs/dotnet-maui.md#deferred-links-optional),
+[Android](./docs/android.md), [iOS](./docs/ios.md).
+
 Full guide, native setup and troubleshooting:
 [`docs/dotnet-maui.md`](./docs/dotnet-maui.md).
 Behaviour shared by all SDKs: [`docs/sdk-contract.md`](./docs/sdk-contract.md).
@@ -42,13 +75,15 @@ Behaviour shared by all SDKs: [`docs/sdk-contract.md`](./docs/sdk-contract.md).
 | Project               | Targets                    | Contents                                                                |
 | --------------------- | -------------------------- | ----------------------------------------------------------------------- |
 | `src/Strybok`         | `netstandard2.0`, `net8.0` | `StrybokClient`, options, `ILinkSource`, `ManualLinkSource`, exceptions |
-| `src/Strybok.Maui`    | `net8.0`                   | `AddStrybok(...)`, platform detection through `DeviceInfo.Platform`     |
+| `src/Strybok.Maui`    | `net8.0`                   | `AddStrybok(...)`, platform detection, `PreferencesDeferredLinkStore`   |
 | `tests/Strybok.Tests` | `net8.0`                   | xUnit tests of the contract (core only)                                 |
 
-> **Early release (0.2.x).** The core library builds and passes its tests in CI. The MAUI glue is
+> **Early release (0.3.x).** The core library builds and passes its tests in CI. The MAUI glue is
 > compiled but has no tests and has never been run inside a MAUI app. Not verified on devices.
 >
-> Deferred deep linking is not supported.
+> A link tapped before the app is installed is not restored by default. Deferred links are
+> optional, off by default and unverified on devices, and the packages ship no store integration:
+> see [Deferred links](#deferred-links-optional).
 
 ## Install
 
