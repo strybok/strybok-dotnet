@@ -77,6 +77,22 @@ public sealed class StrybokOptions
     public string? ClientKey { get; set; }
 
     /// <summary>
+    /// Links without an API call: deliver path links (<c>https://my-app.strybok.link/product/42?id=7</c>)
+    /// and Firebase long links (<c>https://my-app.strybok.link/?link=…</c>) and send the values of
+    /// these payload keys with them. Default: <c>null</c>, the option is not set, and only links
+    /// with a single slug path are ours, exactly as in 0.3.0.
+    /// </summary>
+    /// <remarks>
+    /// Set it to <c>parameterLinks</c> of the integration guide when the owner switched path links
+    /// or Firebase long links on. The server decides which routes, keys and web domains are
+    /// allowed, and the delivered link carries the route and payload of its answer, never the
+    /// tapped path. With the option any address of the link hosts that passes the route rules is
+    /// resolved, so <see cref="OnError"/> gets <see cref="LinkNotFoundException"/> for one that is
+    /// no link. Deferred links keep the slug rule.
+    /// </remarks>
+    public ParameterLinksOptions? ParameterLinks { get; set; }
+
+    /// <summary>
     /// Optional HTTP transport (certificate pinning, proxies, tests). The SDK wraps it in its own
     /// <see cref="HttpClient"/> and does not dispose the handler. Ignored when an
     /// <see cref="HttpClient"/> is passed to the <see cref="StrybokClient"/> constructor.

@@ -4,7 +4,7 @@ The .NET SDK is for .NET MAUI apps, and for .NET for iOS / .NET for Android apps
 Your app hands it the verified HTTPS links the OS delivers, it asks the Strybok API which in-app
 route a link stands for, and it gives your app each link exactly once.
 
-> **Status — read this first.** Early release (0.3.x), published on NuGet.
+> **Status — read this first.** Early release (0.4.x), published on NuGet.
 >
 > | Part                                                | Compiled | Tests run | On a device |
 > | --------------------------------------------------- | -------- | --------- | ----------- |
@@ -28,6 +28,7 @@ The behaviour every Strybok SDK implements is described in the [SDK contract](./
 1. Create an application in Strybok with your iOS and Android identifiers.
 2. Read its setup data: `GET /v1/apps/:appId/integration` returns the managed hostname
    (for example `my-app.strybok.link`) and ready-to-copy snippets.
+   If the application has an active [custom domain](./ios.md#custom-domain-optional), the same answer lists it in `allowedHosts`: declare it in the entitlement and the intent filter next to the managed hostname and pass both to `allowedHosts`.
 3. Tell Strybok about the app as described in step 1 of the [Android](./android.md) and
    [iOS](./ios.md) guides (package name and certificate fingerprints, Team ID and bundle ID).
    Their "verify on a device" and troubleshooting sections apply to .NET apps unchanged.
@@ -307,7 +308,8 @@ once and removes it from the queue, so combining both never navigates twice.
 Options (`StrybokOptions`): `ApiBaseUrl`, `AllowedHosts` (both required), `Timeout` (5 s per
 attempt), `MaxRetries` (2; only timeouts, network errors and 5xx are retried), `RetryDelay`
 (400 ms, doubling), `DedupeWindow` (2 s), `ReportAppOpens` (on), `Platform`, `OnError`,
-`ClientKey` (only for creating links), plus
+`ClientKey` (only for creating links), `ParameterLinks` (off, see
+[Links without an API call](#links-without-an-api-call-optional)), plus
 `HttpMessageHandler`, `Clock` and `Delay` for custom transports and tests. An `HttpClient` can be
 passed to the `StrybokClient` constructor instead. For
 [deferred links](#deferred-links-optional): `DeferredLinks` and `AllowProbabilisticMatching` (both
@@ -376,6 +378,52 @@ It only runs when you call it and is independent of receiving links: it works be
 Also `OperationCanceledException` for your token and `ObjectDisposedException` after `Dispose`.
 Errors never contain the client key or the payload. Do not put personal data in a route or
 payload: whoever receives the link can read them.
+
+### Links without an API call (optional)
+
+New in 0.4.0, **off by default and covered by unit tests only; it has not run on a device or in a
+MAUI app.** An application can let any address of its hosts open a route of the app without
+creating a link first: **path links** such as `https://my-app.strybok.link/product/42?id=7` and
+**Firebase long links** `https://my-app.strybok.link/?link=…`. The owner switches them on in the
+dashboard and chooses the allowed routes and the query keys that become the payload. Without the
+option the SDK accepts only links with a single slug path, exactly as before, and drops these URLs
+without a request.
+
+To deliver them, copy `parameterLinks` of the integration guide — `GET /v1/apps/:appId/integration`,
+shown on the dashboard's setup screen next to `allowedHosts` — into the options:
+
+```csharp
+builder.Services.AddStrybok(options =>
+{
+    options.ApiBaseUrl = new Uri("https://api.strybok.com");
+    options.AllowedHosts.Add("my-app.strybok.link");
+    // parameterLinks.payloadKeys of the integration guide, in its order
+    options.ParameterLinks = new ParameterLinksOptions("id", "lang");
+});
+```
+
+The guide gives `null` while both kinds are off; then leave the option unset.
+
+- **What is sent:** the path exactly as received (`Uri.OriginalString`, never the normalised
+  `Uri`), the first value of each configured key (1–256 characters without control characters)
+  and the `utm_*` values; for a long link the deep link rebuilt from its scheme, host and path
+  with only its payload keys, plus `apn` and `ibi`. Nothing else of the URL, and never the
+  fragment.
+- **What you get:** `link.RoutePath` and `link.Payload` are what the server read — the route to
+  navigate to, never the tapped path. Treat both as untrusted input. The `app_open` event carries
+  the `LinkId` of the answer.
+- **Errors:** the server decides which routes, keys and web domains are allowed. With the option,
+  an address of your hosts that is no link (a typo, a bare host) reaches `OnError` as a
+  `LinkNotFoundException`. An invalid option (more than 20 keys, a key twice, a key that is not
+  1–40 characters of `A–Z a–z 0–9 _ . -`, or `utm_…`, `st`, `sd`, `si`, `strybok_click`) makes the
+  `StrybokClient` constructor throw an `ArgumentException`.
+- **The keys are compiled into the app.** A key the owner adds later reaches users with your next
+  release; until then installed builds send the keys they know. Never configure a key that
+  carries personal data.
+- **Deferred links** keep the single-slug rule (the answer's URL and a pasted link): the server
+  restores only stored links.
+
+The exact rules are in the [SDK contract](./sdk-contract.md#links-without-an-api-call).
 
 ### Deferred links (optional)
 
@@ -550,12 +598,12 @@ platform code for the exact value.
 `ResolveAsync` throws, and `OnError` receives, a `StrybokException` (its `Uri` property is the
 link being handled):
 
-| Type                                                  | Meaning                                                                                                                                                                                  |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UnsupportedLinkException`                            | Not `https`, host not in `AllowedHosts`, credentials, a port other than 443, or not a single-slug path. Thrown before any network call. Ignored silently for links arriving from the OS. |
-| `LinkNotFoundException`                               | Unknown, disabled or expired link (404).                                                                                                                                                 |
-| `StrybokTimeoutException` / `StrybokNetworkException` | No answer after all retries (e.g. offline). The app keeps working; the link is simply not opened. The transport error is the `InnerException`.                                           |
-| `StrybokServerException`                              | Unexpected status or malformed response; `StatusCode` carries the HTTP status (200 for a malformed body).                                                                                |
+| Type                                                  | Meaning                                                                                                                                                                                                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `UnsupportedLinkException`                            | Not `https`, host not in `AllowedHosts`, credentials, a port other than 443, or not a single-slug path (with `ParameterLinks`: not a route path or long link either). Thrown before any network call. Ignored silently for links arriving from the OS. |
+| `LinkNotFoundException`                               | Unknown, disabled or expired link (404).                                                                                                                                                                                                               |
+| `StrybokTimeoutException` / `StrybokNetworkException` | No answer after all retries (e.g. offline). The app keeps working; the link is simply not opened. The transport error is the `InnerException`.                                                                                                         |
+| `StrybokServerException`                              | Unexpected status or malformed response; `StatusCode` carries the HTTP status (200 for a malformed body).                                                                                                                                              |
 
 `ResolveAsync` additionally throws `OperationCanceledException` when your token is cancelled and
 `ObjectDisposedException` after `Dispose`. `OnError` may be called on a background thread.

@@ -25,7 +25,8 @@ public static class StrybokMauiExtensions
     /// </code>
     /// <see cref="StrybokOptions.Platform"/> is pre-filled from <c>DeviceInfo.Platform</c>; the
     /// callback may override it. Set <see cref="StrybokOptions.ClientKey"/> there as well to use
-    /// <see cref="StrybokClient.CreateLinkAsync"/> ("Share" links).
+    /// <see cref="StrybokClient.CreateLinkAsync"/> ("Share" links), and
+    /// <see cref="StrybokOptions.ParameterLinks"/> for links without an API call.
     /// <para>
     /// For deferred links (<see cref="StrybokOptions.DeferredLinks"/>, off by default) these are
     /// pre-filled as well, and the callback may replace any of them:

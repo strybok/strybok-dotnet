@@ -638,6 +638,8 @@ public sealed partial class StrybokClient
                 && root.TryGetProperty("deferred", out var deferred)
                 && deferred.ValueKind == JsonValueKind.True
                 && TryGetString(root, "url", out var url)
+                // Deferred links are offered only for stored links: the slug rule, whatever
+                // ParameterLinks says.
                 && LinkUrl.TryParse(url, _allowedHosts, out _)
                 && Uri.TryCreate(url, UriKind.Absolute, out var uri)
                 && uri is not null

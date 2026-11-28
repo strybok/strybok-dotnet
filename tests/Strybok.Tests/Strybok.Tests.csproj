@@ -19,4 +19,9 @@
     <ProjectReference Include="..\..\src\Strybok\Strybok.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The shared test vectors of the SDK contract, read by ParameterLinkTests. -->
+    <None Update="Fixtures\parameter-links-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

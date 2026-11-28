@@ -42,6 +42,27 @@ parameters of the tapped URL. They are labels chosen by whoever shared the link:
 your analytics, never to decide anything. Details:
 [integration guide](./docs/dotnet-maui.md#campaign-values).
 
+## Links without an API call (optional)
+
+Path links (`https://my-app.strybok.link/product/42?id=7`) and Firebase long links
+(`https://my-app.strybok.link/?link=…`) open a route without a link made in advance, once the
+owner switched them on. Copy `parameterLinks` of the integration guide
+(`GET /v1/apps/:appId/integration`, shown on the dashboard's setup screen) into the options:
+
+```csharp
+builder.Services.AddStrybok(options =>
+{
+    options.ApiBaseUrl = new Uri("https://api.strybok.com");
+    options.AllowedHosts.Add("my-app.strybok.link");
+    options.ParameterLinks = new ParameterLinksOptions("id", "lang"); // parameterLinks.payloadKeys
+});
+```
+
+Only the path and the values of these keys are sent, and `link.RoutePath` / `link.Payload` are
+what the server read, never the tapped path. Off by default; without it nothing changes. New in
+0.4.0, covered by unit tests only. Details:
+[integration guide](./docs/dotnet-maui.md#links-without-an-api-call-optional).
+
 ## Deferred links (optional)
 
 Restoring a link that was tapped before the app was installed is optional, **off by default and
@@ -78,7 +99,7 @@ Behaviour shared by all SDKs: [`docs/sdk-contract.md`](./docs/sdk-contract.md).
 | `src/Strybok.Maui`    | `net8.0`                   | `AddStrybok(...)`, platform detection, `PreferencesDeferredLinkStore`   |
 | `tests/Strybok.Tests` | `net8.0`                   | xUnit tests of the contract (core only)                                 |
 
-> **Early release (0.3.x).** The core library builds and passes its tests in CI. The MAUI glue is
+> **Early release (0.4.x).** The core library builds and passes its tests. The MAUI glue is
 > compiled but has no tests and has never been run inside a MAUI app. Not verified on devices.
 >
 > A link tapped before the app is installed is not restored by default. Deferred links are

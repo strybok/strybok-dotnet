@@ -435,7 +435,7 @@ public sealed class AppOpenEventTests
         Assert.Equal("app_open", body.GetProperty("type").GetString());
         Assert.Equal("link_1", body.GetProperty("linkId").GetString());
         Assert.Equal("unknown", body.GetProperty("platform").GetString());
-        Assert.Equal("0.3.0", body.GetProperty("sdkVersion").GetString());
+        Assert.Equal("0.4.0", body.GetProperty("sdkVersion").GetString());
         Assert.Matches(UuidV4, body.GetProperty("eventId").GetString());
     }
 

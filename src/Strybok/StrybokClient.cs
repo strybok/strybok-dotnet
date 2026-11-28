@@ -33,7 +33,7 @@ namespace Strybok;
 public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
 {
     /// <summary>Version reported with analytics events.</summary>
-    public const string SdkVersion = "0.3.0";
+    public const string SdkVersion = "0.4.0";
 
     private const string ResolvePath = "/v1/public/resolve";
     private const string EventsPath = "/v1/public/events";
@@ -58,6 +58,9 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
     private readonly string _apiBase;
     private readonly string? _clientKey;
     private readonly HashSet<string> _allowedHosts;
+
+    /// <summary>The keys of <see cref="StrybokOptions.ParameterLinks"/>; <c>null</c> without the option.</summary>
+    private readonly string[]? _payloadKeys;
     private readonly TimeSpan _timeout;
     private readonly int _maxRetries;
     private readonly TimeSpan _retryDelay;
@@ -140,6 +143,12 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
         if (_allowedHosts.Count == 0)
         {
             throw new ArgumentException("AllowedHosts must contain at least one hostname.", nameof(options));
+        }
+        if (options.ParameterLinks is not null)
+        {
+            var problem = ParameterLinkRules.Validate(options.ParameterLinks.PayloadKeys);
+            if (problem is not null) throw new ArgumentException("ParameterLinks: " + problem + ".", nameof(options));
+            _payloadKeys = new List<string>(options.ParameterLinks.PayloadKeys).ToArray();
         }
 
         if (options.Timeout <= TimeSpan.Zero) throw new ArgumentException("Timeout must be positive.", nameof(options));
@@ -287,12 +296,13 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
     /// <summary>
     /// Whether <paramref name="uri"/> is a Strybok link of this app: <c>https</c>, a host from
     /// <see cref="StrybokOptions.AllowedHosts"/>, no credentials, no port other than 443 and a
-    /// path that is exactly one slug. The check is made on <see cref="Uri.OriginalString"/>.
+    /// path that is exactly one slug or, with <see cref="StrybokOptions.ParameterLinks"/>, a route
+    /// path or a Firebase long link. The check is made on <see cref="Uri.OriginalString"/>.
     /// </summary>
     public bool IsStrybokUri(Uri? uri) => uri is not null && IsStrybokUri(uri.OriginalString);
 
     /// <summary>Same as <see cref="IsStrybokUri(Uri)"/> for a URL string exactly as received.</summary>
-    public bool IsStrybokUri(string? url) => LinkUrl.TryParse(url, _allowedHosts, out _);
+    public bool IsStrybokUri(string? url) => LinkUrl.TryParse(url, _allowedHosts, _payloadKeys, out _);
 
     /// <summary>
     /// Resolves <paramref name="uri"/> through the API without raising <see cref="LinkReceived"/>
@@ -309,7 +319,7 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
     {
         if (uri is null) throw new ArgumentNullException(nameof(uri));
         ThrowIfDisposed();
-        if (!LinkUrl.TryParse(uri.OriginalString, _allowedHosts, out var lookup))
+        if (!LinkUrl.TryParse(uri.OriginalString, _allowedHosts, _payloadKeys, out var lookup))
         {
             throw new UnsupportedLinkException("Not a link for this app", uri);
         }
@@ -515,7 +525,7 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
             if (uri is null) return;
             var original = uri.OriginalString;
             // Not ours: dropped silently, without an error or a network call.
-            if (!LinkUrl.TryParse(original, _allowedHosts, out var lookup)) return;
+            if (!LinkUrl.TryParse(original, _allowedHosts, _payloadKeys, out var lookup)) return;
 
             lock (_gate)
             {
@@ -625,8 +635,8 @@ public sealed partial class StrybokClient : IAsyncDisposable, IDisposable
 
     private async Task<ResolvedDeepLink> ResolveCoreAsync(Uri uri, string lookup, CancellationToken cancellationToken)
     {
-        // Of the link's query only the campaign parameters are part of the lookup; the rest and
-        // the fragment may hold private data.
+        // Of the link's query only the campaign parameters (and, with ParameterLinks, the payload
+        // keys) are part of the lookup; the rest and the fragment may hold private data.
         var endpoint = new Uri(_apiBase + ResolvePath + "?url=" + Uri.EscapeDataString(lookup));
 
         StrybokException? lastError = null;

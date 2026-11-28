@@ -56,6 +56,7 @@ internal static class DeferredLinkParsing
     {
         if (pasted is null) return null;
         var url = pasted.Trim();
+        // The copied link is a stored link's: the slug rule, whatever ParameterLinks says.
         if (!LinkUrl.TryParse(url, allowedHosts, out _)) return null;
 
         var queryStart = url.IndexOf('?');

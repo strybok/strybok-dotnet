@@ -1,3 +1,31 @@
+## 0.4.0
+
+- Links without an API call, optional and **off by default; covered by unit tests only, never run
+  on a device or in a MAUI app**. New option `StrybokOptions.ParameterLinks`
+  (`ParameterLinksOptions` with `PayloadKeys`), the value of `parameterLinks` in the integration
+  guide. With it, path links (`https://<host>/product/42?id=7`) and Firebase long links
+  (`https://<host>/?link=…`) of the link hosts are links of this app, for the automatic flow,
+  `ResolveAsync` and `IsStrybokUri` alike. The resolve request carries the path exactly as
+  received (`Uri.OriginalString`, never decoded or normalised), the first value of each
+  configured payload key (1–256 UTF-16 code units, no control characters, re-encoded byte by
+  byte) and the `utm_*` values; for a long link the deep link rebuilt from its scheme, host and
+  path with only its payload keys, plus `apn` and `ibi`. Nothing else of the URL is sent.
+- The delivered link has the route and payload of the server's answer, never the tapped path;
+  `app_open` carries the answer's `linkId`. With the option an address of the link hosts that is
+  no link is reported to `OnError` as `LinkNotFoundException`.
+- An invalid option (more than 20 keys, a key twice, a key that is not 1–40 characters of
+  `A–Z a–z 0–9 _ . -`, `utm_…` in any case, `st`, `sd`, `si`, `strybok_click`) makes the
+  `StrybokClient` constructor throw an `ArgumentException`, like an invalid `ApiBaseUrl`.
+- Without the option every request is byte for byte what 0.3.0 sent. Deferred links (the URL of a
+  redeem or match answer, and pasted text) keep the single-slug rule with or without it;
+  `CreateLinkAsync` is unchanged.
+- The tests run every case of the shared test vectors of the SDK contract
+  (`tests/Strybok.Tests/Fixtures/parameter-links-vectors.json`, copied to the test output).
+  Compiled, tested and packed with the .NET 8 SDK like the release workflow (`dotnet build`,
+  `dotnet test`, the `Strybok.Maui` build and both `dotnet pack` runs), outside CI.
+- `app_open` events report `sdkVersion` `0.4.0`.
+- `Strybok.Maui` 0.4.0: no API change; set `ParameterLinks` in the `AddStrybok` callback.
+
 ## 0.3.0
 
 - Campaign values. `ResolvedDeepLink.Campaign` (`LinkCampaign`: `Source`, `Medium`, `Campaign`,
